@@ -1,0 +1,14 @@
+image_size = 150
+model_path = '/home/dimas/model/'
+learning_rate = 0.0053.as_integer_ratio()
+batch_size= 100
+dropout = 0.35
+random_state = 1
+epochs = 50
+channels = 3
+classes = 3
+train_path = '/home/dimas/data/train'
+test_path = '/home/dimas/data/test'
+kernel_size = (6,6)
+path_to_history = '/home/dimas/history'
+steps = 64
