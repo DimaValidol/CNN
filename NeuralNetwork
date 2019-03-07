@@ -1,0 +1,206 @@
+import json
+from keras.models import Sequential
+from keras.layers import Conv2D
+from keras.layers import MaxPooling2D
+from keras.layers import Dropout
+from keras.layers import BatchNormalization
+from keras.layers import Activation
+from keras.layers import Flatten
+from keras.layers import Dense
+from keras.optimizers import Adam
+import numpy as np
+import keras
+import scipy
+import matplotlib.pyplot as plt
+from scipy import ndimage
+import Settings
+import datetime
+import os
+from Settings import *
+
+
+class NeuralNetwork(object):
+
+    def __init__(self, img_size=Settings.image_size, lerning_rate=Settings.learning_rate, path=Settings.model_path,
+                 dropout=Settings.dropout, batch_size=Settings.batch_size, epochs=Settings.epochs,
+                 steps=Settings.steps):
+        self.leaning_rate = lerning_rate
+        self.dropout = dropout
+        self.batch_size = batch_size
+        self.img_size = img_size
+        self.model_path = path
+        self.epochs = epochs
+        self.steps = steps
+
+    def make_network(self):
+        model = Sequential()
+        model.add(Conv2D(64, (6, 6), padding="same",
+                         input_shape=(image_size, image_size, 3), activation='relu'))
+        model.add(BatchNormalization(axis=3))
+        model.add(MaxPooling2D(pool_size=(2, 2)))
+        model.add(Dropout(0.25))
+        model.add(Conv2D(64, (6, 6), padding="same", activation='relu'))
+        model.add(BatchNormalization(axis=3))
+        model.add(Conv2D(64, (6, 6), padding="same", activation='relu'))
+        model.add(BatchNormalization(axis=3))
+        model.add(MaxPooling2D(pool_size=(2, 2)))
+        model.add(Dropout(0.25))
+        model.add(Conv2D(64, (6, 6), padding="same", activation='relu'))
+        model.add(BatchNormalization(axis=3))
+        model.add(Conv2D(128, (6, 6), padding="same", activation='relu'))
+        model.add(BatchNormalization(axis=3))
+        model.add(MaxPooling2D(pool_size=(2, 2)))
+        model.add(Dropout(0.3))
+        model.add(MaxPooling2D(pool_size=(2, 2)))
+        model.add(Conv2D(256, (6, 6), padding="same", activation='relu'))
+        model.add(BatchNormalization(axis=3))
+        model.add(Flatten())
+        model.add(Dense(10000))
+        model.add(BatchNormalization())
+        model.add(Dropout(self.dropout))
+
+        model.add(Dense(4, activation='softmax'))
+
+        adam = keras.optimizers.Adam(lr=self.leaning_rate, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0.0,
+                                     amsgrad=False)
+        model.compile(optimizer=adam, loss="categorical_crossentropy", metrics=['accuracy'])
+        self.score = model.summary()
+
+        return model
+
+    def fit_network(self):
+        model = self.make_network()
+        train_generator = Generator(train_path)
+        test_generator = Generator(test_path, abs_path=test_path)
+        callback = keras.callbacks.ModelCheckpoint(model_path, monitor='val_acc', verbose=1,
+                                                   save_best_only=False,
+                                                   save_weights_only=False, mode='max', period=1)
+        callback_List = [callback]
+        history = model.fit_generator(generator=train_generator, callbacks=callback_List, epochs=self.epochs, verbose=1,
+                                      validation_data=test_generator,
+                                      shuffle=True, steps_per_epoch=self.steps, initial_epoch=0,
+                                      use_multiprocessing=True,
+                                      workers=12)
+
+    def save_history(self, history):
+        time = datetime.datetime.now()
+        additional_history = {'epochs': self.epochs,
+                              'batch': batch_size,
+                              'eta': self.leaning_rate,
+                              'kernel_size': kernel_size[0]
+
+                              }
+        additional_history.update(history.history)
+        self.history_path = history_path = path_to_history + ":" + str(time.year) + ":" + str(time.month) + ":" + str(
+            time.hour) + ":" + str(time.minute) + ".json"
+        with open(history_path, 'w') as f:
+            json.dump(additional_history, f)
+
+    def save_model(self, model):
+        self.model.save(model_path)
+
+    def load_model(self):
+
+        if os.path.exists(self.model_path):
+            model = keras.models.load_model(self.model_path)
+            return model
+
+    def predict(self, path, model):
+        model = model
+        if os.path.exists(path):
+            image = np.array(ndimage.imread(path, flatten=False))
+            my_image = scipy.misc.imresize(image, size=(image_size, image_size)).reshape(
+                (1, image_size, image_size, 3))
+            tmp = model.predict_classes(my_image)
+            if tmp[0] == 1:
+                print(str(tmp[0]) + "  it's a car")
+            elif tmp[0] == 0:
+                print(str(tmp[0]) + "  it's a clock")
+            elif tmp[0] == 2:
+                print(str(tmp[0]) + " it's a cat")
+            elif tmp[0] == 3:
+                print(str(tmp[0]) + " it's a dog")
+
+            plt.imshow(image)
+            plt.show()
+
+
+class Generator(keras.utils.Sequence):
+
+    def __init__(self, list_IDs, abs_path=train_path, batch_size=batch_size, dim=(image_size, image_size),
+                 n_channels=channels,
+                 n_classes=classes, shuffle=True):
+        'Initialization'
+        self.dim = dim
+        self.batch_size = batch_size
+        self.list_IDs = os.listdir(list_IDs)
+        self.abs_path = abs_path
+        self.n_channels = n_channels
+        self.n_classes = n_classes
+        self.shuffle = shuffle
+        self.on_epoch_end()
+
+    def __len__(self):
+        'Denotes the number of batches per epoch'
+        return int(np.floor(len(self.list_IDs) / self.batch_size))
+
+    def __getitem__(self, index):
+        'Generate one batch of data'
+        # Generate indexes of the batch
+        indexes = self.indexes[index * self.batch_size:(index + 1) * self.batch_size]
+
+        # Find list of IDs
+        list_IDs_temp = [self.list_IDs[k] for k in indexes]
+
+        # Generate data
+        X, y = self.__data_generation(list_IDs_temp)
+
+        return X, y
+
+    def load_labels(self, path):
+        """used to load labels"""
+        if path.__contains__('car'):
+            label = 0
+        elif path.__contains__('clock'):
+            label = 1
+        elif path.__contains__('cat'):
+            label = 2
+        else:
+            label = 3
+
+        return label
+
+    def preprocess_input(self, path):
+        """preprocessing input images from path
+        resizing each image to a 4dim vector with params (1, 50, 50, 3)
+        """
+        my_image = None
+        image = np.array(ndimage.imread(self.abs_path + '/' + path, flatten=False))
+        try:
+            my_image = scipy.misc.imresize(image, size=self.dim).reshape(
+                (1, image_size, image_size, 3))
+        except Exception as e:
+            print(path, e)
+            os.remove(self.abs_path + "/" + path)
+
+        return my_image
+
+    def on_epoch_end(self):
+        'Updates indexes after each epoch'
+        self.indexes = np.arange(len(self.list_IDs))
+        if self.shuffle:
+            np.random.shuffle(self.indexes)
+
+    def __data_generation(self, list_IDs_temp):
+        """Generates data containing batch_size samples"""  # X : (n_samples, *dim, n_channels)
+
+        X = np.empty((self.batch_size, *self.dim, self.n_channels))
+        y = np.empty(self.batch_size, dtype=int)
+
+        # Generate data
+        for i, path in enumerate(list_IDs_temp):
+            X[i,] = self.preprocess_input(path)
+
+            y[i] = self.load_labels(path)
+
+        return X, keras.utils.to_categorical(y, num_classes=self.n_classes)
